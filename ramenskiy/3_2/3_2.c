@@ -3,194 +3,209 @@
 #include <mpi.h>
 #include <math.h>
 
-// Функция для чтения матрицы из файла
-double* read_matrix(const char* filename, int* n) {
-    FILE* file = fopen(filename, "r");
-    if (!file) {
-        fprintf(stderr, "Ошибка открытия файла %s\n", filename);
-        return NULL;
-    }
-    
-    if (fscanf(file, "%d", n) != 1) {
-        fprintf(stderr, "Ошибка чтения размерности матрицы\n");
-        fclose(file);
-        return NULL;
-    }
-    
-    printf("Чтение матрицы размером %d x %d\n", *n, *n);
-    
-    double* matrix = (double*)malloc((*n) * (*n) * sizeof(double));
-    if (!matrix) {
-        fclose(file);
-        return NULL;
-    }
-    
-    for (int i = 0; i < (*n) * (*n); i++) {
-        if (fscanf(file, "%lf", &matrix[i]) != 1) {
-            fprintf(stderr, "Ошибка чтения элемента %d\n", i);
-            free(matrix);
-            fclose(file);
-            return NULL;
-        }
-    }
-    
-    fclose(file);
-    return matrix;
-}
-
-// Функция для вывода матрицы
-void print_matrix(double* matrix, int n) {
-    for (int i = 0; i < n; i++) {
+// Функция для симметризации матрицы (упрощенная версия)
+void symmetrize_matrix(double* local_block, int n, int rank, int size, int local_rows, int start_row) {
+    // Проходим по всем элементам в локальном блоке
+    for (int i = start_row; i < start_row + local_rows; i++) {
+        int local_i = i - start_row;
+        
         for (int j = 0; j < n; j++) {
-            printf("%8.2f ", matrix[i * n + j]);
-        }
-        printf("\n");
-    }
-}
-
-// Функция для проверки симметричности матрицы
-int check_matrix_symmetry(double* matrix, int n) {
-    for (int i = 0; i < n; i++) {
-        for (int j = i + 1; j < n; j++) {
-            if (fabs(matrix[i * n + j] - matrix[j * n + i]) > 1e-10) {
-                printf("Матрица не симметрична: a[%d][%d]=%f, a[%d][%d]=%f\n", 
-                       i, j, matrix[i * n + j], j, i, matrix[j * n + i]);
-                return 0;
+            if (i == j) continue; // Пропускаем диагональ
+            
+            double aij = local_block[local_i * n + j];
+            
+            // Определяем процесс для строки j
+            int target_proc = j % size;
+            
+            if (target_proc == rank) {
+                // Элемент в том же процессе
+                int local_j = j - start_row;
+                if (local_j >= 0 && local_j < local_rows) {
+                    double aji = local_block[local_j * n + i];
+                    double sym = (aij + aji) / 2.0;
+                    local_block[local_i * n + j] = sym;
+                    local_block[local_j * n + i] = sym;
+                }
             }
         }
     }
-    return 1;
 }
 
-// MPI-подпрограмма для преобразования матрицы
-void symmetrize_matrix(double* local_block, int n, int rank, int size, int* counts, int* displs) {
-    // Создаем полную матрицу на каждом процессе для простоты
-    // В реальных приложениях нужно более эффективное распределение
-    double* full_matrix = (double*)malloc(n * n * sizeof(double));
-    double* full_transpose = (double*)malloc(n * n * sizeof(double));
+// Функция для обмена данными между процессами
+void exchange_data(double* local_block, int n, int rank, int size, int local_rows, int start_row) {
+    MPI_Status status;
     
-    // Собираем полную матрицу на всех процессах
-    MPI_Allgatherv(local_block, counts[rank], MPI_DOUBLE,
-                   full_matrix, counts, displs, MPI_DOUBLE,
-                   MPI_COMM_WORLD);
-    
-    printf("Процесс %d получил полную матрицу\n", rank);
-    
-    // Транспонируем матрицу
-    for (int i = 0; i < n; i++) {
-        for (int j = 0; j < n; j++) {
-            full_transpose[j * n + i] = full_matrix[i * n + j];
+    // Обмениваемся данными со всеми процессами
+    for (int target = 0; target < size; target++) {
+        if (target == rank) continue;
+        
+        // Отправляем свою первую строку целевому процессу
+        if (local_rows > 0) {
+            MPI_Send(local_block, n, MPI_DOUBLE, target, 0, MPI_COMM_WORLD);
         }
+        
+        // Получаем строку от целевого процесса
+        double* recv_buffer = (double*)malloc(n * sizeof(double));
+        MPI_Recv(recv_buffer, n, MPI_DOUBLE, target, 0, MPI_COMM_WORLD, &status);
+        
+        // Обновляем свои элементы, используя полученные данные
+        for (int j = 0; j < n; j++) {
+            if (j >= start_row && j < start_row + local_rows) {
+                int local_j = j - start_row;
+                double aij = local_block[local_j * n + target];
+                double aji = recv_buffer[target];
+                double sym = (aij + aji) / 2.0;
+                local_block[local_j * n + target] = sym;
+            }
+        }
+        
+        free(recv_buffer);
+    }
+}
+
+// Чтение матрицы из файла
+double* read_matrix(const char* filename, int* n) {
+    FILE* f = fopen(filename, "r");
+    if (!f) return NULL;
+    
+    fscanf(f, "%d", n);
+    double* m = (double*)malloc((*n) * (*n) * sizeof(double));
+    
+    for (int i = 0; i < (*n) * (*n); i++) {
+        fscanf(f, "%lf", &m[i]);
     }
     
-    // Вычисляем (a + a^T)/2 для всей матрицы
-    for (int i = 0; i < n * n; i++) {
-        full_matrix[i] = (full_matrix[i] + full_transpose[i]) / 2.0;
-    }
-    
-    // Копируем только локальную часть обратно
-    for (int i = 0; i < counts[rank]; i++) {
-        local_block[i] = full_matrix[displs[rank] + i];
-    }
-    
-    free(full_matrix);
-    free(full_transpose);
+    fclose(f);
+    return m;
 }
 
 int main(int argc, char* argv[]) {
     int rank, size;
-    double* matrix = NULL;
+    int n;
+    double* full_matrix = NULL;
     double* local_block = NULL;
-    int n = 0;
     
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     
-    // Подавление предупреждения о MIT-MAGIC-COOKIE (опционально)
-    setenv("QT_QPA_PLATFORM", "offscreen", 0);
-    
     if (argc != 2) {
-        if (rank == 0) {
-            fprintf(stderr, "Использование: %s <имя_файла_с_матрицей>\n", argv[0]);
-        }
+        if (rank == 0) 
+            printf("Использование: %s <файл>\n", argv[0]);
         MPI_Finalize();
         return 1;
     }
     
-    // Процесс 0 читает матрицу из файла
+    // Процесс 0 читает матрицу
     if (rank == 0) {
-        matrix = read_matrix(argv[1], &n);
-        if (!matrix) {
+        full_matrix = read_matrix(argv[1], &n);
+        if (!full_matrix) {
+            printf("Ошибка чтения файла\n");
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
         
-        printf("Исходная матрица:\n");
-        print_matrix(matrix, n);
-        
-        // Проверяем исходную матрицу на симметричность
-        printf("\nПроверка исходной матрицы:\n");
-        if (check_matrix_symmetry(matrix, n)) {
-            printf("Исходная матрица симметрична\n");
-        } else {
-            printf("Исходная матрица НЕ симметрична\n");
+        printf("Исходная матрица %dx%d:\n", n, n);
+        for (int i = 0; i < n; i++) {
+            for (int j = 0; j < n; j++) {
+                printf("%7.2f ", full_matrix[i*n + j]);
+            }
+            printf("\n");
         }
+        printf("\n");
     }
     
-    // Рассылаем размерность матрицы всем процессам
+    // Рассылаем размер
     MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
     
-    // Вычисляем распределение данных
-    int* counts = (int*)malloc(size * sizeof(int));
-    int* displs = (int*)malloc(size * sizeof(int));
+    // Простое распределение: каждый процесс получает одну строку
+    // (если процессов больше чем строк, лишние процессы ничего не делают)
+    int local_rows = 0;
+    int start_row = -1;
     
-    int elements_per_proc_base = (n * n) / size;
-    int remainder = (n * n) % size;
-    
-    displs[0] = 0;
-    for (int i = 0; i < size; i++) {
-        counts[i] = elements_per_proc_base + (i < remainder ? 1 : 0);
-        if (i > 0) {
-            displs[i] = displs[i-1] + counts[i-1];
-        }
+    if (rank < n) {
+        local_rows = 1;
+        start_row = rank;
     }
     
-    // Выделяем память под локальный блок
-    local_block = (double*)malloc(counts[rank] * sizeof(double));
+    printf("Процесс %d: строк=%d, начало=%d\n", rank, local_rows, start_row);
     
-    // Распределяем данные между процессами
-    MPI_Scatterv(matrix, counts, displs, MPI_DOUBLE,
-                 local_block, counts[rank], MPI_DOUBLE,
-                 0, MPI_COMM_WORLD);
+    // Выделяем память
+    if (local_rows > 0) {
+        local_block = (double*)malloc(local_rows * n * sizeof(double));
+    }
     
-    // Преобразуем матрицу
-    symmetrize_matrix(local_block, n, rank, size, counts, displs);
-    
-    // Собираем результат обратно на процесс 0
-    MPI_Gatherv(local_block, counts[rank], MPI_DOUBLE,
-                matrix, counts, displs, MPI_DOUBLE,
-                0, MPI_COMM_WORLD);
-    
-    // Процесс 0 выводит результат и проверяет симметричность
+    // Рассылаем данные построчно
     if (rank == 0) {
-        printf("\nСимметризованная матрица (a + a^T)/2:\n");
-        print_matrix(matrix, n);
+        // Процесс 0 оставляет себе строку 0
+        if (0 < n) {
+            for (int j = 0; j < n; j++) {
+                local_block[j] = full_matrix[0 * n + j];
+            }
+        }
         
-        printf("\nПроверка полученной матрицы:\n");
-        if (check_matrix_symmetry(matrix, n)) {
-            printf("Полученная матрица симметрична\n");
-        } else {
-            printf("Полученная матрица НЕ симметрична - ошибка!\n");
+        // Отправляем строки другим процессам
+        for (int i = 1; i < n && i < size; i++) {
+            MPI_Send(&full_matrix[i * n], n, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
+        }
+    } else {
+        if (local_rows > 0) {
+            MPI_Recv(local_block, n, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
     }
     
-    // Освобождаем память
-    free(local_block);
-    free(counts);
-    free(displs);
-    if (rank == 0) {
-        free(matrix);
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    // Симметризация (только для процессов с данными)
+    if (local_rows > 0) {
+        symmetrize_matrix(local_block, n, rank, size, local_rows, start_row);
     }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    // Обмен данными между процессами
+    if (local_rows > 0) {
+        exchange_data(local_block, n, rank, size, local_rows, start_row);
+    }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    // Сбор результатов
+    if (rank == 0) {
+        printf("Симметризованная матрица:\n");
+        
+        // Выводим строку 0
+        for (int j = 0; j < n; j++) {
+            printf("%7.2f ", local_block[j]);
+        }
+        printf("\n");
+        
+        // Получаем и выводим строки от других процессов
+        for (int i = 1; i < n && i < size; i++) {
+            double* row = (double*)malloc(n * sizeof(double));
+            MPI_Recv(row, n, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            
+            for (int j = 0; j < n; j++) {
+                printf("%7.2f ", row[j]);
+            }
+            printf("\n");
+            
+            free(row);
+        }
+        
+        // Если есть строки, которые не были обработаны (при size < n)
+        for (int i = size; i < n; i++) {
+            printf("Строка %d не была обработана (недостаточно процессов)\n", i);
+        }
+        
+    } else {
+        if (local_rows > 0) {
+            MPI_Send(local_block, n, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+        }
+    }
+    
+    // Очистка
+    if (local_rows > 0) free(local_block);
+    if (rank == 0) free(full_matrix);
     
     MPI_Finalize();
     return 0;

@@ -88,7 +88,8 @@ int check_symmetric_omp(double** matrix, int n, int num_threads) {
     // Устанавливаем количество потоков
     omp_set_num_threads(num_threads);
     
-    // Параллельная проверка
+    // Параллельная проверка - Директива OpenMP, которая создает параллельную область,
+    // где код выполняется несколькими потоками одновременно.
     #pragma omp parallel
     {
         int thread_id = omp_get_thread_num();
@@ -99,6 +100,7 @@ int check_symmetric_omp(double** matrix, int n, int num_threads) {
             for (int j = i + 1; j < n; j++) {
                 // Сравниваем с плавающей точкой
                 if (fabs(matrix[i][j] - matrix[j][i]) > 1e-9) {
+                    // гарантирует, что только один поток за раз может выполнять этот блок
                     #pragma omp critical
                     {
                         if (is_symmetric) {
