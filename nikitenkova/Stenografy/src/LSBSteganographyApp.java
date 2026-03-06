@@ -373,18 +373,18 @@ public class LSBSteganographyApp extends JFrame {
     }
 
     private String getEncoding() {
-        switch (encodingComboBox.getSelectedIndex()) {
-            case 0: return "UTF-8";
-            case 1: return "Windows-1251";
-            case 2: return "ASCII";
-            default: return "UTF-8";
-        }
+        return switch (encodingComboBox.getSelectedIndex()) {
+            case 0 -> "UTF-8";
+            case 1 -> "Windows-1251";
+            case 2 -> "ASCII";
+            default -> "UTF-8";
+        };
     }
 
     private String tryDecodeWithEncodings(byte[] bytes) {
         // Пробуем UTF-8
         try {
-            return new String(bytes, "UTF-8");
+            return new String(bytes, StandardCharsets.UTF_8);
         } catch (Exception e) {
             // Пробуем Windows-1251
             try {
@@ -546,6 +546,14 @@ public class LSBSteganographyApp extends JFrame {
             }
         }
 
+        final int messageLength = getMessageLength(data, endMarker, startPos);
+        byte[] message = new byte[messageLength];
+        System.arraycopy(data, startPos, message, 0, messageLength);
+
+        return message;
+    }
+
+    private static int getMessageLength(byte[] data, byte[] endMarker, int startPos) {
         if (startPos == -1) {
             throw new RuntimeException("Не найден маркер начала сообщения");
         }
@@ -572,10 +580,7 @@ public class LSBSteganographyApp extends JFrame {
 
         // Извлекаем сообщение
         int messageLength = endPos - startPos;
-        byte[] message = new byte[messageLength];
-        System.arraycopy(data, startPos, message, 0, messageLength);
-
-        return message;
+        return messageLength;
     }
 
     private void showError(String title, String message) {
