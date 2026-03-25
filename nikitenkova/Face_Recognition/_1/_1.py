@@ -1,6 +1,3 @@
-#!/home/user/Python-3.11.9/python
-# -*- coding: utf-8 -*-
-
 import cv2
 import mediapipe as mp
 import numpy as np
