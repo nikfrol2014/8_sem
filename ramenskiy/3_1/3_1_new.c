@@ -22,18 +22,28 @@ int main(int argc, char *argv[]) {
     
     int n, rank, size, local_result, global_result;
     double *matrix = NULL;
+    char *filename = NULL;
 
     /*Инициализация MPI. Получаем ранг текущего процесса и общее количество процессов*/
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
+    /*Проверка аргументов командной строки только для корневого процесса*/
+    if (rank == 0) {
+        if (argc != 2) {
+            printf("Использование: %s <имя_файла>\n", argv[0]);
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
+        filename = argv[1];
+    }
+
     /*Чтение матрицы только для корневого процесса*/
     if (rank == 0) {
         
-        FILE *file = fopen("no_sym_mat.txt", "r");
+        FILE *file = fopen(filename, "r");
         if (!file) {
-            printf("Ошибка открытия файла\n");
+            printf("Ошибка открытия файла %s\n", filename);
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
 

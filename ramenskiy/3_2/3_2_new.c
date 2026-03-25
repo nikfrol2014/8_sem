@@ -19,6 +19,8 @@ int main(int argc, char *argv[]) {
     int n, rank, size;
     double *matrix = NULL;
     double *local_matrix = NULL;
+    char *input_filename = NULL;
+    // char *output_filename = NULL;
     
     /*Массивы для сбора данных*/
     int *displs = NULL; /*Количество элементов от каждого процесса*/
@@ -29,11 +31,21 @@ int main(int argc, char *argv[]) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
+    /*Проверка аргументов командной строки только для корневого процесса*/
+    if (rank == 0) {
+        if (argc != 3) {
+            fprintf(stderr, "Использование: %s <входной_файл>\n", argv[0]);
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
+        input_filename = argv[1];
+        // output_filename = argv[2];
+    }
+
     /*Чтение матрицы только для корневого процесса*/
     if (rank == 0) {
-        FILE *file = fopen("no_sym_mat.txt", "r");
+        FILE *file = fopen(input_filename, "r");
         if (!file) {
-            fprintf(stderr, "Ошибка открытия файла\n");
+            fprintf(stderr, "Ошибка открытия файла %s\n", input_filename);
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
 
@@ -116,21 +128,17 @@ int main(int argc, char *argv[]) {
     
     /*Запись симметричной матрицы только для корневого процесса*/
     if (rank == 0) {
-        FILE *outfile = fopen("res.txt", "w");
-        if (!outfile) {
-            fprintf(stderr, "Ошибка открытия файла для записи\n");
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-    
+        printf("Симметризованная матрица:\n");
         for (int i = 0; i < n; i++) {
             for (int j = 0; j < n; j++) {
-                fprintf(outfile, "%.2f ", matrix[i * n + j]);
+                printf("%8.2f ", matrix[i * n + j]);
             }
-            fprintf(outfile, "\n");
+            printf("\n");
         }
     
-        fclose(outfile);
         free(matrix);
+        free(displs);
+        free(sendcounts);
     }
 
     free(local_matrix);

@@ -1,3 +1,3 @@
-mpicc -o 3_2 3_2.c -lm
+mpicc -o 3_2 3_2_new.c
 
-mpirun -np 4 ./3_2 nonsym_matrix.txt
+mpirun -np 7 ./3_2 ../data/nsymmat.txt res.txt
