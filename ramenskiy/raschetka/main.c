@@ -260,8 +260,8 @@ PointXYZ* find_all_xyz_simple(const PointXY *xy, size_t nxy,
                 // Ищем совпадения в YZ
                 for (size_t k = 0; k < nyz; k++) {
                     if (approx_eq(yz[k].y, y) && approx_eq(yz[k].z, z)) {
-                        printf("    Found YZ match: (%.3f, %.3f)\n", yz[k].y, yz[k].z);
-                        printf("    -> Found 3D point: (%.3f, %.3f, %.3f)\n", x, y, z);
+                        // printf("    Found YZ match: (%.3f, %.3f)\n", yz[k].y, yz[k].z);
+                        // printf("    -> Found 3D point: (%.3f, %.3f, %.3f)\n", x, y, z);
                         
                         // Добавляем точку
                         if (cnt == cap) {
@@ -285,6 +285,18 @@ PointXYZ* find_all_xyz_simple(const PointXY *xy, size_t nxy,
     
     *out_cnt = cnt;
     return result;
+}
+
+/*проверка, была ли уже эта точка*/
+int point_exists(PointXYZ *points, int count, PointXYZ new_point) {
+    for (int i = 0; i < count; i++) {
+        if (approx_eq(points[i].x, new_point.x) &&
+            approx_eq(points[i].y, new_point.y) &&
+            approx_eq(points[i].z, new_point.z)) {
+            return 1; // точка уже есть
+        }
+    }
+    return 0; // новой точки нет
 }
 
 /* ----------------------------------------- */
@@ -372,21 +384,60 @@ int main(int argc, char *argv[]) {
     size_t nxyz;
     PointXYZ *xyz = find_all_xyz_simple(xy, nxy, xz, nxz, yz, nyz, &nxyz);
 
-    // Вывод результатов
+     // ========== ПОИСК И ВЫВОД ТОЛЬКО УНИКАЛЬНЫХ ТОЧЕК ==========
     printf("\n========================================================\n");
-    printf("RESULTS:\n");
-    printf("Found %zu unique 3D points (eps = %.3f):\n", nxyz, EPS);
-    if (nxyz > 0) {
-        for (size_t i = 0; i < nxyz; i++) {
-            printf("  Point %zu: (%.6f, %.6f, %.6f)\n", i+1, xyz[i].x, xyz[i].y, xyz[i].z);
+    printf("RESULTS (UNIQUE 3D POINTS):\n");
+    
+    PointXYZ *unique_points = NULL;
+    int unique_count = 0;
+    int found_count = 0;
+    
+    for (size_t i = 0; i < nxy; i++) {
+        double x = xy[i].x;
+        double y = xy[i].y;
+        
+        for (size_t j = 0; j < nxz; j++) {
+            if (approx_eq(xz[j].x, x)) {
+                double z = xz[j].z;
+                
+                for (size_t k = 0; k < nyz; k++) {
+                    if (approx_eq(yz[k].y, y) && approx_eq(yz[k].z, z)) {
+                        found_count++;
+                        
+                        PointXYZ new_point = {x, y, z};
+                        
+                        // Проверяем, не выводили ли уже такую точку
+                        if (!point_exists(unique_points, unique_count, new_point)) {
+                            unique_count++;
+                            unique_points = realloc(unique_points, unique_count * sizeof(PointXYZ));
+                            unique_points[unique_count-1] = new_point;
+                            printf("  Point %d: (%.6f, %.6f, %.6f)\n", unique_count, x, y, z);
+                        }
+                        break;
+                    }
+                }
+            }
         }
-    } else {
-        printf("  No 3D points found\n");
-        printf("\nPossible reasons:\n");
-        printf("  1. The points in different files don't match within eps=%.3f\n", EPS);
-        printf("  2. Check if the coordinates in files are correct\n");
-        printf("  3. Try increasing EPS value or check the input data\n");
     }
+    
+    printf("\nTotal matches found: %d\n", found_count);
+    printf("Unique 3D points: %d (eps = %.3f)\n", unique_count, EPS);
+
+    // Вывод результатов
+    // printf("\n========================================================\n");
+    // printf("RESULTS:\n");
+    // printf("Found %zu unique 3D points (eps = %.3f):\n", nxyz, EPS);
+    // if (nxyz > 0) {
+    //     for (size_t i = 0; i < nxyz; i++) {
+    //         printf("  Point %zu: (%.6f, %.6f, %.6f)\n", i+1, xyz[i].x, xyz[i].y, xyz[i].z);
+    //     }
+    // } else {
+    //     printf("  No 3D points found\n");
+    //     printf("\nPossible reasons:\n");
+    //     printf("  1. The points in different files don't match within eps=%.3f\n", EPS);
+    //     printf("  2. Check if the coordinates in files are correct\n");
+    //     printf("  3. Try increasing EPS value or check the input data\n");
+    // }
     printf("========================================================\n");
 
     // Освобождение памяти
